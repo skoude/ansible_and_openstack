@@ -106,11 +106,6 @@
     debug: var=data.private_ip
 
 
-  # Add newly created Instance to runtime inventory file
-  - name: add instance to runtime inventory
-    add_host: name={{ data.info.name }} group openstack ansible_ssh_host={{ data.public_ip }}
-
-
   - name: waiting for ssh to start
     wait_for: port=22 host={{ data.public_ip }} timeout=200
               search_regex=OpenSSH
@@ -129,7 +124,7 @@
     #- mongodb
     #- savagegus.consul
 
-#define variables 
+  #define variables for consul
   #vars:
     #consul_is_ui: "true"
     #consul_is_server: "true"
@@ -154,7 +149,6 @@
 
   # set the root password. Use hashed password here: 
   - user: name=root password="{{ root_password }}"
-  #- shell: ./ssh restart chdir=/etc/init.d/
     notify:
     - restart ssh
  
