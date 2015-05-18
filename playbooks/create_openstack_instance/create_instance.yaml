@@ -1,0 +1,165 @@
+# Boots up a new ubuntu trusty instance in Openstack and changes ssh configurtaion so that the 
+# root -login is allowded. Then changes the root password and restarts the ssh daemon 
+# Note: This is tested on Ansible 1.9.1. 
+# you can execute this playbook by running: ansible-playbook -i host create_instance.yaml -v
+
+
+- name: launch a nova instance
+  hosts: localhost
+
+  vars_prompt:
+  - name: "openstack_auth_url"    
+    prompt: "Enter the openstack_auth_url"    
+    private: no    
+
+  - name: "instance_name"
+    prompt: "Enter the instance name that is to be created"
+    private: no
+
+  - name: "login_username"
+    prompt: "Enter the API username"
+    private: no
+
+  - name: "login_password"
+    prompt: "Enter the API password"
+    private: yes
+
+  - name: "tenant_name"
+    prompt: "Enter the tenant name"
+    private: no
+
+  - name: "key_name"
+    prompt: "Enter the openstack ssh-key name"
+    private: no
+
+  - name: "private_key_name"
+    prompt: "Enter the ssh private key file name (NOTE:  the file must be on this same directory!)"
+    private: no
+
+  tasks:
+  - name: upload ubuntu tursty image on glance image store
+    glance_image: 
+      auth_url: "{{ openstack_auth_url }}"    #your API address
+      login_username: "{{ login_username }}"
+      login_password: "{{ login_password }}"
+      login_tenant_name: "{{ tenant_name }}"
+      name : trusty_cloud_image
+      container_format: bare
+      disk_format: qcow2
+      state: present
+      copy_from: https://cloud-images.ubuntu.com/trusty/current/trusty-server-cloudimg-amd64-disk1.img
+    register: image
+
+  - debug: var=image.id
+
+  - name: launch an instance on openstack
+    nova_compute:
+      state: present
+      login_username: "{{ login_username }}"
+      login_password: "{{ login_password }}"
+      login_tenant_name: "{{ tenant_name }}"
+      name: "{{ instance_name }}"
+      auth_url: "{{openstack_auth_url}}"     #your API address
+
+
+
+      # image ID.. You can get these by issuing glance list -command.
+      image_id: "{{ image.id }}"
+
+      # Generate key,if needed by issuing command:
+      # ssh-keygen -t rsa -f cloud.key
+      # then upload it to your tenant(project):
+      # nova keypair-add --pub-key cloud.pub cloudkey
+      key_name: "{{ key_name }}"
+      wait_for: 200
+
+      # The id of the flavor:  nova flavor-list
+      flavor_id: 3
+
+      # security group id: nova secgroup-list
+      security_groups: default
+
+      # insert the network pool that contains the floating ip's if you need one. Otherwise just comment this out
+      floating_ip_pools: ['external']
+
+      # in here you must know the correct network id. If you are using neuton, you can just use:
+      # Kari-MacBook-Pro:skoude_test_project skoude$ neutron net-list
+      # +--------------------------------------+----------+-----------------------------------------------------+
+      # | id                                   | name     | subnets                                             |
+      # +--------------------------------------+----------+-----------------------------------------------------+
+      # | 7b4b47a4-93fe-42eb-8d3d-337430c4025f | internal | 6d427371-85fb-4dcb-b136-2394d20b5a27 172.20.0.0/20  |
+      # | 82ebf9e9-a103-4913-9c75-50c92906fc26 | external | 67721806-7b55-4fa9-b144-1149f5b2d810 172.20.16.0/20 |
+      # +--------------------------------------+----------+-----------------------------------------------------+
+      # Kari-MacBook-Pro:skoude_test_project skoude$
+      nics:
+        - net-id: 7b4b47a4-93fe-42eb-8d3d-337430c4025f
+
+    # just assing the information from created instance to a variable called data
+    register: data 
+
+    # this is just for debugging
+  - debug: var=data.private_ip
+  - debug: var=data.id     
+  - debug: var=data.info.name
+
+  - name: debug launch    
+    debug: var=data.private_ip
+
+
+  # Add newly created Instance to runtime inventory file
+  - name: add instance to runtime inventory
+    add_host: name={{ data.info.name }} group openstack ansible_ssh_host={{ data.public_ip }}
+
+
+  - name: waiting for ssh to start
+    wait_for: port=22 host={{ data.public_ip }} timeout=200
+              search_regex=OpenSSH
+
+
+  - name: add host to group
+    add_host: name={{ data.public_ip }} groups=just_created ansible_ssh_private_key_file="{{ private_key_name }}"
+
+
+- hosts: just_created
+  remote_user: ubuntu
+  sudo: true
+
+  # we could install some apps on remote server here. for example mongodb, consul etc..
+  roles:
+    #- mongodb
+    #- savagegus.consul
+
+#define variables 
+  #vars:
+    #consul_is_ui: "true"
+    #consul_is_server: "true"
+    #consul_datacenter: "test"
+    #consul_bootstrap: "true"
+    #consul_node_name: "vagrant"
+    #consul_bind_address: "{{ ansible_default_ipv4['address'] }}"
+
+  # prompt for root password
+  vars_prompt:
+  - name: "root_password"    
+    prompt: "Enter a password for the newly created instances root user"    
+    private: yes    
+    encrypt: "md5_crypt" #need to have python-passlib installed in local machine before we can use it    
+    confirm: yes    
+    salt_size: 7   
+
+  # define tasks.. Modify the ssh config so on ubuntu trusty that root login is allowed and also set the root password  
+  tasks:
+  - lineinfile: dest=/etc/ssh/sshd_config regexp=^PermitRootLogin line='PermitRootLogin yes'
+  - lineinfile: dest=/etc/ssh/sshd_config regexp=^PasswordAuthentication line='PasswordAuthentication yes'
+
+  # set the root password. Use hashed password here: 
+  - user: name=root password="{{ root_password }}"
+  #- shell: ./ssh restart chdir=/etc/init.d/
+    notify:
+    - restart ssh
+ 
+ 
+  handlers:
+    - name: restart ssh
+      service: name=ssh state=restarted
+      sudo: true
