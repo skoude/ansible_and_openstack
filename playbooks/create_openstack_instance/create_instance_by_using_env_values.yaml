@@ -1,33 +1,23 @@
 # Boots up a new ubuntu trusty instance in Openstack and changes ssh configurtaion so that the 
 # root -login is allowded. Then changes the root password and restarts the ssh daemon 
 # Note: This is tested on Ansible 1.9.1. 
-# you can execute this playbook by running: ansible-playbook -i host create_instance.yaml -v
+# To execute this playbook successfully, you need to:
+# 1. download the openRC-file from projects Access And Security page. 
+# 2. run: source ./openrc.sh
+# 3. execute this playbook by running: ansible-playbook -i host create_instance._by_using_env_values.yaml -v
 
 
 - name: launch a nova instance
   hosts: localhost
 
-  vars_prompt:
-  - name: "openstack_auth_url"    
-    prompt: "Enter the openstack_auth_url"    
-    private: no    
 
+  vars_prompt:
+  #- name: "openrc_file"
+  #  prompt: "Path to the openrc-file"
+  #  private: no
   - name: "instance_name"
     prompt: "Enter the instance name that is to be created"
     private: no
-
-  - name: "login_username"
-    prompt: "Enter the API username"
-    private: no
-
-  - name: "login_password"
-    prompt: "Enter the API password"
-    private: yes
-
-  - name: "tenant_name"
-    prompt: "Enter the tenant name"
-    private: no
-    default: skoude-project
 
   - name: "key_name"
     prompt: "Enter the openstack ssh-key name"
@@ -39,6 +29,7 @@
     private: no
     default: cloud.key
 
+
   - name: "flavor_id"
     prompt: "Enter the flavor id. You can see the flavors by running: nova flavor-list"
     private: no
@@ -49,7 +40,20 @@
     private: no
     default: 7b4b47a4-93fe-42eb-8d3d-337430c4025f
 
+
+  vars: 
+    openstack_auth_url: "{{ lookup('env','OS_AUTH_URL') }}"
+    login_username: "{{ lookup('env', 'OS_USERNAME')}}"
+    login_password: "{{ lookup('env', 'OS_PASSWORD')}}"
+    tenant_name: "{{ lookup('env', 'OS_TENANT_NAME')}}"
+
   tasks:
+  #- name: execute openRC-file
+  #  script: ./{{ openrc_file}}
+  - debug: var=openstack_auth_url
+  - debug: var=login_username
+  - debug: var=login_password
+
   - name: upload ubuntu tursty image on glance image store
     glance_image: 
       auth_url: "{{ openstack_auth_url }}"    #your API address
@@ -106,8 +110,6 @@
       # Kari-MacBook-Pro:skoude_test_project skoude$
       nics:
         - net-id: "{{ net_id }}"
-
-  
 
     # "just assing the information from created instance to a variable called data
     register: data 
